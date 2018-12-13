@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"time"
@@ -31,6 +32,8 @@ func launchTCPserver() {
 			fmt.Println("Error accepting: ", err.Error())
 			os.Exit(1)
 		}
+		fmt.Println("[server] connection established")
+
 		// Handle connections in a new goroutine.
 		go handleRequest(conn)
 	}
@@ -38,9 +41,19 @@ func launchTCPserver() {
 
 // Handles incoming requests.
 func handleRequest(conn net.Conn) {
+OuterLoop:
 	for {
 		// will listen for message to process ending in newline (\n)
-		message, _ := bufio.NewReader(conn).ReadString('\n')
+		message, err := bufio.NewReader(conn).ReadString('\n')
+		switch err {
+		case io.EOF:
+			fmt.Printf("[server] client disconnected: %v\n", err)
+			break OuterLoop
+		case nil:
+		default:
+			fmt.Println(err)
+			break OuterLoop
+		}
 		// output message received
 		fmt.Print("[server] Message Received:", string(message))
 		// Processing

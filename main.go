@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 type Pool interface {
@@ -41,16 +42,14 @@ func NewConnPool(count int, f NewConn) (Pool, error) {
 }
 
 func (cp *ConnPool) Get() (net.Conn, error) {
-	// Let it block if pool doesn't have enough connections
+	if cp.conns == nil {
+		return nil, errors.New("connection is nil")
+	}
+
+	// Block here until he gets a conn
 	select {
 	case conn := <-cp.conns:
-		if conn == nil {
-			return nil, errors.New("no available connection")
-		}
 		return conn, nil
-		// default: // New connection if pool is full
-		//	conn, err := cp.newConn()
-		//	return conn, err
 	}
 }
 
@@ -58,17 +57,16 @@ func (cp *ConnPool) Put(conn net.Conn) error {
 	if conn == nil {
 		return errors.New("connection is nil")
 	}
+
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
+
 	select {
 	case cp.conns <- conn:
 		return nil
 	default:
 		// pool is full
-		if err := conn.Close(); err != nil {
-			return err
-		}
-		return errors.New("pool is full")
+		return conn.Close()
 	}
 }
 
@@ -99,7 +97,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to new pool, err: ", err)
 	}
-	fmt.Println("Connection count: ", p.Len())
+	fmt.Println("Request count: ", p.Len())
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -107,17 +105,19 @@ func main() {
 		go func(i int) {
 			conn, err := p.Get()
 			if err != nil {
-				log.Printf("[connection %d] err: %v\n", err)
+				log.Printf("[Request %d] err: %v\n", i, err)
 			} else {
-				fmt.Fprintf(conn, "[connection %d] text: %d\n", i, i)
+				fmt.Fprintf(conn, "[Request %d] text: %d\n", i, i)
 				message, _ := bufio.NewReader(conn).ReadString('\n')
-				fmt.Printf("[connection %d] Message from server: %s", i, message)
+				fmt.Printf("[Request %d] Message from server: %s", i, message)
 			}
 			if err := p.Put(conn); err != nil {
-				log.Printf("[connection %d] err: %v\n", err)
+				log.Printf("[Request %d] err: %v\n", i, err)
 			}
 			wg.Done()
 		}(i)
 	}
 	wg.Wait()
+	p.Close()
+	time.Sleep(1 * time.Second)
 }
